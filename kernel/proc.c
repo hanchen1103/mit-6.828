@@ -123,6 +123,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->sandbox_mask = 0;
+  memset(p->allow_filename, 0, MAXPATH);
   p->state = USED;
 
   // Allocate a trapframe page.
@@ -297,6 +299,9 @@ kfork(void)
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+  np->sandbox_mask = p->sandbox_mask;
+  safestrcpy(np->allow_filename, p->allow_filename, sizeof(p->allow_filename));
+  
   release(&np->lock);
 
   return pid;

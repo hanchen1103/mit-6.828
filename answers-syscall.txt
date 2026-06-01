@@ -1,0 +1,10 @@
+usertrap
+$2 = 0xf
+It represents SYS_open
+User Mode
+lw	a3,0(zero)
+a3
+The kernel crashes because it attempts to read from virtual address 0. The kernel address space starts mapping physical memory at 00x80000000. The address 0 is not mapped in the kernel page table.
+The scause=0xd corresponds to a "Load Page Fault". This matches the situation: the kernel executed a lw (Load Word) instruction to an unmapped address, triggering the fault.
+init
+1

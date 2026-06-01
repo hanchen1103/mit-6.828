@@ -105,3 +105,20 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_interpose(void)
+{
+  int n;
+
+  struct proc *p = myproc();
+  argint(0, &n);
+
+  p->sandbox_mask = n;
+
+  if(argstr(1, p->allow_filename, MAXPATH) < 0) {
+    return -1;
+  }
+
+  return 0;
+}
