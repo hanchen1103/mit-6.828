@@ -1,0 +1,80 @@
+$ pgtbltest
+print_pgtbl starting
+va 0x0 pte 0x217C7C5B pa 0x85F1F000 perm 0x5B
+va 0x1000 pte 0x217C705B pa 0x85F1C000 perm 0x5B
+va 0x2000 pte 0x217C6C17 pa 0x85F1B000 perm 0x17
+va 0x3000 pte 0x217C6807 pa 0x85F1A000 perm 0x7
+va 0x4000 pte 0x217C64D7 pa 0x85F19000 perm 0xD7
+va 0x5000 pte 0x0 pa 0x0 perm 0x0
+va 0x6000 pte 0x0 pa 0x0 perm 0x0
+va 0x7000 pte 0x0 pa 0x0 perm 0x0
+va 0x8000 pte 0x0 pa 0x0 perm 0x0
+va 0x9000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFF6000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFF7000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFF8000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFF9000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFFA000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFFB000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFFC000 pte 0x0 pa 0x0 perm 0x0
+va 0x3FFFFFD000 pte 0x217D4813 pa 0x85F52000 perm 0x13
+va 0x3FFFFFE000 pte 0x217D00C7 pa 0x85F40000 perm 0xC7
+va 0x3FFFFFF000 pte 0x2000184B pa 0x80006000 perm 0x4B
+print_pgtbl: OK
+
+1)
+UXWRV
+43210
+
+0x5B = 0101 1011 -> U=1, X=1, R=1, V=1
+0x5B = 0101 1011 -> U=1, X=1, R=1, V=1
+0x17 = 0001 0111 -> U=1, W=1, R=1, V=1
+0x07 = 0000 0111 -> U=0, W=1, R=1, V=1
+0xD7 = 1101 0111 -> U=1, W=1, R=1, V=1
+
+page 39, Figure 3.4: A process’s user address space, with its initial stack
+
+The user address space layout is:
+
+trampoline
+trapframe
+USYSCALL
+...
+unused      currently unused; may be used later by heap growth
+future heap / unused area  - 0x5000 and above
+stack                       - 0x4000
+guard page                  - 0x3000, user cannot access this page
+data                        - 0x2000
+text/code                   - 0x0 and 0x1000
+
+va 0x3FFFFFD000 pte 0x217D4813 pa 0x85F52000 perm 0x13  USYSCALL
+va 0x3FFFFFE000 pte 0x217D00C7 pa 0x85F40000 perm 0xC7  TRAPFRAME
+va 0x3FFFFFF000 pte 0x2000184B pa 0x80006000 perm 0x4B  TRAMPOLINE
+
+2)
+sys_uptime could be sped up using the shared page.
+
+3)
+print_kpgtbl starting
+page table 0x0000000085f22000
+ ..0x0000000000000000: pte 0x00000000217c7801 pa 0x0000000085f1e000
+ .. ..0x0000000000000000: pte 0x00000000217c7401 pa 0x0000000085f1d000
+ .. .. ..0x0000000000000000: pte 0x00000000217c7c5b pa 0x0000000085f1f000
+ .. .. ..0x0000000000001000: pte 0x00000000217c705b pa 0x0000000085f1c000
+ .. .. ..0x0000000000002000: pte 0x00000000217c6cd7 pa 0x0000000085f1b000
+ .. .. ..0x0000000000003000: pte 0x00000000217c6807 pa 0x0000000085f1a000
+ .. .. ..0x0000000000004000: pte 0x00000000217c64d7 pa 0x0000000085f19000
+ ..0x0000003fc0000000: pte 0x00000000217c8401 pa 0x0000000085f21000
+ .. ..0x0000003fffe00000: pte 0x00000000217c8001 pa 0x0000000085f20000
+ .. .. ..0x0000003fffffd000: pte 0x00000000217d4853 pa 0x0000000085f52000
+ .. .. ..0x0000003fffffe000: pte 0x00000000217d00c7 pa 0x0000000085f40000
+ .. .. ..0x0000003ffffff000: pte 0x000000002000184b pa 0x0000000080006000
+print_kpgtbl: OK
+superpg_fork starting
+usertrap(): unexpected scause 0xf pid=69
+            sepc=0x2f6 stval=0x5001
+superpg_fork: OK
+superpg_free starting
+usertrap(): unexpected scause 0xd pid=70
+            sepc=0x414 stval=0xfff001
+superpg_free: OK
