@@ -1,0 +1,22 @@
+Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+
+a0-a7 hold function arguments (a0 = 1st, a1 = 2nd, ...).
+In main's call to printf, 13 is the 3rd argument, so it is in a2 (li a2,13).
+
+Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+
+There is no call to f in main and no call to g in f: the compiler inlined them. 
+In main, f(8)+1 is computed at compile time and becomes the constant 12 (li a1,12). In f, the body of g is copied in directly (addiw a0,a0,3) instead of calling g with jal.
+
+At what address is the function printf located?
+printf is at address 0x734 (main calls it with "jal 734 <printf>"). 
+0000000000000734 <printf>:
+
+What value is in the register ra just after the jalr to printf in main?
+0x3c
+
+
+He110 World
+
+It prints whatever value happens to be in register a2. printf takes the second %d from the 3rd argument, which by the calling convention is in a2. 
+The caller only set a0 (format string) and a1 (3), so a2 holds a leftover value from earlier code, i.e. an unpredictable value.
