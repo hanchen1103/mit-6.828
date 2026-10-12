@@ -107,3 +107,28 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_sigalarm()
+{
+  int ticks0;
+  uint64 handler;
+
+  argint(0, &ticks0);
+  argaddr(1, &handler);
+
+  myproc()->handler_pointer = handler;
+  myproc()->interval = ticks0;
+
+  return 0;
+}
+
+uint64
+sys_sigreturn()
+{
+  myproc()->reentry = 1;
+  *myproc()->trapframe = myproc()->backup_trapframe;
+
+  return myproc()->backup_trapframe.a0;
+
+}
