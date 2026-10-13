@@ -10,6 +10,8 @@
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);
+int get_pa_counter_idx(void *pa);
+
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -23,10 +25,14 @@ struct {
   struct run *freelist;
 } kmem;
 
+
+uint8 counter[(PHYSTOP - KERNBASE) / PGSIZE] = {0};
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  memset(counter, 1, (PHYSTOP - KERNBASE) / PGSIZE);
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -52,6 +58,22 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
+
+  acquire(&kmem.lock);
+  int idx = get_pa_counter_idx(pa);
+
+  if(counter[idx] == 0) {
+    panic("kfree: refcount");
+  }
+
+  counter[idx] --;
+
+  if (counter[idx] > 0) { 
+     release(&kmem.lock);
+    return ;
+  }
+  release(&kmem.lock);
+
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
@@ -78,5 +100,29 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+  if(r) {
+    int idx = get_pa_counter_idx((char*) r);
+    counter[idx] = 1;
+  }
+  
+
   return (void*)r;
+}
+
+int 
+get_pa_counter_idx(void *pa) {
+  if(((uint64)pa % PGSIZE) != 0 || (uint64)pa < KERNBASE || (uint64)pa >= PHYSTOP)
+    panic("counter");
+  
+  return ((uint64)pa - KERNBASE) / PGSIZE;
+}
+
+void
+increase_counter(void *pa) {
+  if(((uint64)pa % PGSIZE) != 0 || (uint64)pa < KERNBASE || (uint64)pa >= PHYSTOP)
+    panic("counter");
+  acquire(&kmem.lock);
+  counter[((uint64)pa - KERNBASE) / PGSIZE] ++;
+  release(&kmem.lock);
 }
