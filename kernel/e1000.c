@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 #include "e1000_dev.h"
+#include "net.h"
 
 #define TX_RING_SIZE 16
 static struct tx_desc tx_ring[TX_RING_SIZE] __attribute__((aligned(16)));
@@ -105,6 +106,26 @@ e1000_transmit(char *buf, int len)
   // so that the caller knows to free buf.
   //
 
+  acquire(&e1000_lock);
+  uint32 i = regs[E1000_TDT];
+  
+  struct tx_desc *expect_next_packet = &tx_ring[i];
+
+  if (!(expect_next_packet->status & E1000_TXD_STAT_DD)) {
+    release(&e1000_lock);
+    return -1;
+  }
+
+  if (expect_next_packet->addr != 0) {
+      kfree((void *)(expect_next_packet->addr));
+  }
+
+  expect_next_packet->addr = (uint64) buf;
+  expect_next_packet->length = len;
+  expect_next_packet->status = 0;
+  expect_next_packet->cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  regs[E1000_TDT] = (i + 1) % TX_RING_SIZE;
+  release(&e1000_lock);
   
   return 0;
 }
@@ -118,6 +139,35 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver a buf for each packet (using net_rx()).
   //
+  acquire(&e1000_lock);
+
+  uint32 tail = regs[E1000_RDT];
+
+  uint32 i = (tail + 1) % RX_RING_SIZE;
+
+  struct rx_desc *next_waiting_received_packet = &rx_ring[i];
+
+
+  while(next_waiting_received_packet->status & E1000_RXD_STAT_DD) {
+    release(&e1000_lock);
+
+    net_rx((char *)next_waiting_received_packet->addr, next_waiting_received_packet->length);
+
+    acquire(&e1000_lock);
+
+    rx_ring[i].addr = (uint64) kalloc();
+    if (!rx_ring[i].addr)
+      panic("e1000 recv");
+
+    regs[E1000_RDT] = i;
+
+    next_waiting_received_packet->status = 0;
+    i = (i + 1) % RX_RING_SIZE;
+    next_waiting_received_packet = &rx_ring[i];
+    
+  }
+
+  release(&e1000_lock);
 
 }
 

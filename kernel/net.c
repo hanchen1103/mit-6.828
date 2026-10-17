@@ -19,6 +19,23 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
 static struct spinlock netlock;
 
+#define NPORT 16
+#define MAX_QUEUE_LENGTH 16
+
+struct portinfo {
+  int portid;
+  char *buf[16];
+
+  int used;
+
+  uint8 head;
+  uint8 tail;
+  uint8 counter;
+};
+
+static struct portinfo ports[NPORT];
+
+
 void
 netinit(void)
 {
@@ -37,7 +54,27 @@ sys_bind(void)
   //
   // Your code here.
   //
+  int port;
+  argint(0, &port);
 
+  acquire(&netlock);
+
+
+  for (int i = 0; i < NPORT; i ++) {
+    if (!ports[i].used) {
+      struct portinfo *pi = &ports[i];
+      pi->used = 1;
+      pi->portid = port;
+      pi->tail = 0;
+      pi->head = 0;
+      pi->counter = 0;
+      
+      release(&netlock);
+      return 0;
+    }
+  }
+
+  release(&netlock);
   return -1;
 }
 
@@ -77,7 +114,75 @@ sys_recv(void)
   //
   // Your code here.
   //
-  return -1;
+
+  struct proc *p = myproc();
+
+  int dport;
+  uint64 src;
+  uint64 sport;
+  uint64 ubuf;
+  int maxlen;
+
+  argint(0, &dport);
+  argaddr(1, &src);
+  argaddr(2, &sport);
+  argaddr(3, &ubuf);
+  argint(4, &maxlen);
+
+
+  acquire(&netlock);
+
+  struct portinfo *pi = 0;
+
+  for(int i = 0; i < NPORT; i ++) {
+    if(ports[i].portid == dport && ports[i].used) {
+      pi = &ports[i];
+      break;
+    }
+  }
+
+  if(!pi) {
+    release(&netlock);
+    return -1;
+  }
+
+  while(pi->counter == 0) {
+    sleep(pi, &netlock);
+  }
+
+  char* buf = pi->buf[pi->head];
+
+  pi->head = (pi->head + 1) % MAX_QUEUE_LENGTH;
+  pi->counter --;
+
+  release(&netlock);
+
+  struct eth *ineth = (struct eth *) buf;
+  struct ip *inip = (struct ip *) (ineth + 1);
+  struct udp *inudp = (struct udp *) (inip + 1);
+
+
+  uint32 sip = ntohl(inip->ip_src);
+  uint16 sp = ntohs(inudp->sport);
+
+  if (copyout(p->pagetable, src, (char *)&sip, sizeof(sip)) == -1) {
+    kfree(buf);
+    return -1;
+  }
+
+  if(copyout(p->pagetable, sport, (char *)&sp, sizeof(sp)) == -1) {
+    kfree(buf);
+    return -1;
+  }
+
+  int len = ntohs(inudp->ulen) - 8 > maxlen ? maxlen : ntohs(inudp->ulen) - 8;
+  if (copyout(p->pagetable, ubuf, (char *)(inudp + 1), len)) {
+    kfree(buf);
+    return -1;
+  }
+
+  kfree(buf);
+  return len;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -191,7 +296,39 @@ ip_rx(char *buf, int len)
   //
   // Your code here.
   //
-  
+
+  struct eth *ineth = (struct eth *) buf;
+  struct ip *inip = (struct ip *) (ineth + 1);
+
+  if(inip->ip_p != IPPROTO_UDP) {
+    kfree(buf);
+    return ;
+  }
+
+  struct udp *inudp = (struct udp *) (inip + 1);
+  uint16 dport_ = inudp->dport;
+  int dport = ntohs(dport_);
+
+  acquire(&netlock);
+  for(int i = 0; i < NPORT; i ++) {
+    if(ports[i].portid == dport && ports[i].used == 1) {
+      struct portinfo *pi = &ports[i];
+      if (pi->counter == MAX_QUEUE_LENGTH) {
+        kfree(buf);
+        release(&netlock);
+        return ;
+      }
+      pi->buf[pi->tail] = buf;
+      pi->counter += 1;
+      pi->tail = (pi->tail + 1) % MAX_QUEUE_LENGTH;
+      wakeup(pi);
+      release(&netlock);
+      return ;
+    } 
+  }
+
+  kfree(buf);
+  release(&netlock);
 }
 
 //
