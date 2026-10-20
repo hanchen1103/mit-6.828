@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define STEAL_PAGE_NUMBER 128
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -19,24 +21,38 @@ struct run {
 };
 
 struct {
-  struct spinlock lock;
-  struct run *freelist;
+  struct spinlock lock[NCPU];
+  struct run *freelist[NCPU];
 } kmem;
+
+void 
+getlockname(char *buf, int size, int n){
+  snprintf(buf, size, "kmem%d", n);  
+}
+
+static char lockname[NCPU][8];
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+
+  for(int i = 0; i < NCPU; i ++) {
+    getlockname(lockname[i], sizeof(lockname[i]), i);
+    initlock(&kmem.lock[i], lockname[i]);
+  }
+  
   freerange(end, (void*)PHYSTOP);
 }
 
 void
 freerange(void *pa_start, void *pa_end)
 {
+  
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
+  
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -56,10 +72,18 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  push_off();
+  int cid = cpuid();
+  acquire(&kmem.lock[cid]);
+  r->next = kmem.freelist[cid];
+  kmem.freelist[cid] = r;
+  release(&kmem.lock[cid]);
+  pop_off();
+
+  // acquire(&kmem.lock);
+  // r->next = kmem.freelist;
+  // kmem.freelist = r;
+  // release(&kmem.lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,13 +94,70 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  push_off();
+  int cid = cpuid();
+  int mycid = cid;
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
-  return (void*)r;
+  int count = 0;
+
+  while(count < NCPU) {
+    acquire(&kmem.lock[cid]);
+
+    if (kmem.freelist[cid]) {
+      r = kmem.freelist[cid];
+
+      if (mycid == cid) {
+        kmem.freelist[cid] = r->next;
+        release(&kmem.lock[cid]);
+        pop_off();  
+        memset((char*)r, 5, PGSIZE); // fill with junk
+        return (void*)r;
+      }
+
+      struct run* head = r;
+
+      for (int i = 0; i < STEAL_PAGE_NUMBER; i ++) {
+        if(head->next) {
+          head = head->next;
+        } else {
+          break;
+        }
+      }
+
+      kmem.freelist[cid] = head->next;
+
+      if (head == r) {
+        release(&kmem.lock[cid]);
+        memset((char*)head, 5, PGSIZE);
+        pop_off();
+        return (void*) head;
+      } 
+
+      head->next = 0;
+      release(&kmem.lock[cid]);
+      acquire(&kmem.lock[mycid]);
+      kmem.freelist[mycid] = r->next;
+      release(&kmem.lock[mycid]);
+      memset((char*)r, 5, PGSIZE);
+      pop_off();
+      return (void*) r;
+    }
+
+    release(&kmem.lock[cid]);
+    cid = (cid + 1) % NCPU;
+    count++;
+  }
+
+  pop_off();
+  return 0;
+  
+  // acquire(&kmem.lock);
+  // r = kmem.freelist;
+  // if(r)
+  //   kmem.freelist = r->next;
+  // release(&kmem.lock);
+
+  // if(r)
+  //   memset((char*)r, 5, PGSIZE); // fill with junk
+  // return (void*)r;
 }
