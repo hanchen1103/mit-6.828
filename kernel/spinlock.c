@@ -125,28 +125,85 @@ static void
 read_acquire_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  acquire(&rwlk->l);
+  // acquire(&rwlk->l);
+
+  while(1) {
+
+    while(__sync_lock_test_and_set(&rwlk->minilocker, 1) != 0) {
+    }
+
+    __sync_synchronize();
+
+    if (rwlk->waiting_w_counter > 0 || rwlk->writing) {
+      __sync_lock_release(&rwlk->minilocker);
+      continue;
+    } else {
+      rwlk->reading_counter += 1;
+      __sync_synchronize();
+      __sync_lock_release(&rwlk->minilocker);
+      break;
+    }
+  
+  }
 }
 
 static void
 read_release_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  release(&rwlk->l);
+  // release(&rwlk->l);
+
+  while(__sync_lock_test_and_set(&rwlk->minilocker, 1) != 0) {
+  }
+  __sync_synchronize();
+  rwlk->reading_counter -= 1;
+  __sync_lock_release(&rwlk->minilocker);
 }
 
 static void
 write_acquire_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  acquire(&rwlk->l);
+  // acquire(&rwlk->l);
+  int iam_waiting = 0;
+
+  while(1) {
+    while(__sync_lock_test_and_set(&rwlk->minilocker, 1) != 0) {
+    }
+
+    __sync_synchronize();
+
+
+
+    if(!rwlk->writing && rwlk->reading_counter == 0) {
+      if (iam_waiting) {
+        rwlk->waiting_w_counter -= 1;
+      }
+      rwlk->writing = 1;
+      __sync_lock_release(&rwlk->minilocker);
+      break;
+    }
+
+    if (iam_waiting == 0) {
+      iam_waiting = 1;
+      rwlk->waiting_w_counter += 1;
+    } 
+    __sync_lock_release(&rwlk->minilocker);
+    continue;
+  }
+
 }
 
 static void
 write_release_inner(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  release(&rwlk->l);
+  // release(&rwlk->l);
+  while(__sync_lock_test_and_set(&rwlk->minilocker, 1) != 0) {
+  }
+  __sync_synchronize();
+  rwlk->writing = 0;
+  __sync_lock_release(&rwlk->minilocker);
 }
 
 void
@@ -181,7 +238,11 @@ void
 initrwlock(struct rwspinlock *rwlk)
 {
   // Replace this with your implementation.
-  initlock(&rwlk->l, "rwlk");
+  // initlock(&rwlk->l, "rwlk");
+  rwlk->minilocker = 0;
+  rwlk->reading_counter = 0;
+  rwlk->waiting_w_counter = 0;
+  rwlk->writing = 0;
 }
 
 // Test rwspinlock implementation.
