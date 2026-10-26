@@ -169,6 +169,37 @@ bad:
   return -1;
 }
 
+static struct inode* create(char *path, short type, short major, short minor);
+
+uint64
+sys_symlink(void)
+{
+
+  struct inode *sym_inode;
+
+  char target[MAXPATH], path[MAXPATH];
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+    return -1;
+  }
+  
+  begin_op();
+
+  sym_inode = create(path, T_SYMLINK, 0, 0);
+
+  if (!sym_inode) {
+    end_op();
+    return -1;
+  }
+    
+  writei(sym_inode, 0, (uint64) target, 0, strlen(target));
+
+  iunlockput(sym_inode);
+
+  end_op();
+  return 0;
+}
+
 // Is the directory dp empty except for "." and ".." ?
 static int
 isdirempty(struct inode *dp)
@@ -328,12 +359,54 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+
+    if(ip->type == T_SYMLINK ) {
+
+      if(!(omode & O_NOFOLLOW)) {
+        int counter = 0;
+        int find = 0;
+
+        while(counter < 10) {
+          char buf[MAXPATH];
+          
+          int total_r = readi(ip, 0, (uint64)buf, 0, ip->size);
+
+          if (total_r == 0) {
+            iunlockput(ip);
+            end_op();
+            return -1;
+          }
+          buf[ip->size] = '\0';
+          iunlockput(ip);
+
+          if((ip = namei(buf)) == 0){
+            end_op();
+            return -1;
+          }
+
+          ilock(ip);
+          if(ip->type == T_SYMLINK) {
+            counter ++;
+            continue;
+          }
+          find = 1;
+          break;
+        }
+        if(counter > 9 && find == 0) {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+      }
+    }
+
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
       return -1;
     }
   }
+  
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
@@ -348,6 +421,7 @@ sys_open(void)
     end_op();
     return -1;
   }
+  
 
   if(ip->type == T_DEVICE){
     f->type = FD_DEVICE;

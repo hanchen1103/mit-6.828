@@ -1,0 +1,17 @@
+{
+  "configurations": [
+    {
+      "name": "xv6-riscv",
+      "compilerPath": "/opt/homebrew/bin/riscv64-unknown-elf-gcc",
+      "includePath": [
+        "${workspaceFolder}"
+      ],
+      "defines": [
+        "LAB_LOCK",
+        "SOL_LOCK"
+      ],
+      "cStandard": "c11"
+    }
+  ],
+  "version": 4
+}
