@@ -503,3 +503,150 @@ sys_pipe(void)
   }
   return 0;
 }
+
+
+uint64
+sys_mmap(void) {
+
+  uint64 addr;
+  uint64 len;
+  int prot, flags;
+  uint64 offset;
+
+  argaddr(0, &addr);
+  argaddr(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
+  argaddr(5, &offset);
+
+  struct proc *p = myproc();
+
+  int int_pos = 0;
+
+  struct file *pf;
+  if (argfd(4, 0, &pf) < 0) {
+    return -1;
+  }
+  
+  if (pf->writable == 0) {
+    if((prot & PROT_WRITE) && (flags & MAP_SHARED)) {
+      return -1;
+    }
+  }
+
+  for(int i = 0; i < 16; i ++) {
+    if (p->vma[i].len == 0) {
+      int_pos = 1;
+      filedup(pf);
+      addr = PGROUNDDOWN(p->mmap_head - len);
+
+      p->mmap_head = addr;
+      p->vma[i].addr = addr;
+      p->vma[i].len = len;
+      p->vma[i].f = pf;
+      p->vma[i].flags = flags;
+      p->vma[i].prot = prot;
+      p->vma[i].offset = offset;
+      break;
+    }
+  }
+
+  if(int_pos == 0) {
+    return -1;
+  }
+
+  return addr;
+}
+
+
+uint64 munmap_handler(uint64 addr, uint64 len) {
+  len = PGROUNDUP(len);
+
+  struct proc *p = myproc();
+
+  for(int i = 0; i < 16; i ++) {
+    uint64 vma_end_addr = p->vma[i].addr + p->vma[i].len;
+    if(addr >= p->vma[i].addr && addr < vma_end_addr) {
+
+      if(addr + len > vma_end_addr) {
+        return -1;
+      }
+
+      struct file *fp = p->vma[i].f;
+
+      if(p->vma[i].flags & MAP_SHARED) {
+        
+        for(uint64 j = addr; j < addr + len; j += PGSIZE) {
+          if (!ismapped(p->pagetable, j)) {
+            continue;
+          }
+
+          uint64 file_offset = p->vma[i].offset + (j - p->vma[i].addr);
+
+          int k = 0;
+          int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+
+          int n = 0;
+          if (file_offset >= fp->ip->size) {
+            n = 0;
+          } else if(file_offset + PGSIZE > fp->ip->size) {
+            n = fp->ip->size - file_offset;
+          } else {
+            n = PGSIZE;
+          }
+          
+          while(k < n) {
+            int n1 = n - k;
+            if (n1 > max)
+              n1 = max;
+            
+            begin_op();
+            ilock(fp->ip);
+            int r = 0;
+            if((r = writei(fp->ip, 1, j + k, file_offset + k, n1)) < 0) {
+              iunlock(fp->ip);
+              end_op();
+              return -1;
+            }
+            iunlock(fp->ip);
+            end_op();
+
+            if(r != n1) {
+              return -1;
+            }
+            k += r;
+          }
+        }
+      }
+
+      if (addr == p->vma[i].addr && len == p->vma[i].len) {
+        fileclose(fp);
+        p->vma[i].addr = 0;
+        p->vma[i].f = 0;
+        p->vma[i].len = 0;
+      } else {
+        if (addr == p->vma[i].addr) {
+          p->vma[i].addr = addr + len;
+          p->vma[i].offset = p->vma[i].offset + len;
+        }
+        p->vma[i].len -= len;
+      }
+
+      uvmunmap(p->pagetable, addr, (len / PGSIZE), 1);
+      return 0;
+    } 
+  }
+  return -1;
+}
+
+uint64
+sys_munmap(void) {
+  uint64 addr;
+  uint64 len;
+
+  argaddr(0, &addr);
+  argaddr(1, &len);
+
+  return munmap_handler(addr, len);
+
+}

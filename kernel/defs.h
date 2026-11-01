@@ -242,3 +242,10 @@ void            netinit(void);
 void            net_rx(char *buf, int len);
 
 #endif
+
+
+#ifdef LAB_MMAP
+
+uint64         munmap_handler(uint64 addr, uint64 len);
+
+#endif

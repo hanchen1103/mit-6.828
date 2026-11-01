@@ -146,6 +146,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->mmap_head = MMAP;
+
   return p;
 }
 
@@ -285,6 +287,15 @@ kfork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+  for(i = 0; i < 16; i ++) {
+    if (p->vma[i].len != 0) {
+      np->vma[i] = p->vma[i];
+      filedup(np->vma[i].f);
+    }
+  }
+  np->mmap_head = p->mmap_head;
+  
+
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -334,6 +345,12 @@ kexit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  for (int i = 0; i < 16; i ++) {
+    if(p->vma[i].len != 0) {
+      munmap_handler(p->vma[i].addr, p->vma[i].len);
     }
   }
 
